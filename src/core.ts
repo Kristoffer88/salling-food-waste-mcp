@@ -68,7 +68,7 @@ export const tools: Record<string, ToolDef> = {
     config: {
       title: "Search food waste",
       description:
-        "Find nearby stores with discounted food waste items. Accepts a Danish ZIP code (e.g. '8000'), GPS coordinates (e.g. '56.15,10.21'), or a Danish address (e.g. 'Vestergade 1, Aarhus'). Returns stores with their clearance products, prices, and discounts.",
+        "Find nearby stores with discounted food waste items. Accepts a Danish ZIP code (e.g. '8000'), GPS coordinates (e.g. '56.15,10.21'), or a Danish address (e.g. 'Vestergade 1, Aarhus'). Returns stores with their clearance products, prices, discounts, use-by date (offer.endTime), and remaining stock (offer.stock).",
       inputSchema: z.object({
         location: z
           .string()
@@ -96,7 +96,7 @@ export const tools: Record<string, ToolDef> = {
     config: {
       title: "Get store food waste",
       description:
-        "Get the full list of discounted food waste products for a specific store by its Salling store ID.",
+        "Get the full list of discounted food waste products for a specific store by its Salling store ID. Includes use-by date (offer.endTime) and remaining stock (offer.stock) per item.",
       inputSchema: z.object({
         storeId: z.string().describe("Salling store ID"),
       }),
