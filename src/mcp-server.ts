@@ -2,7 +2,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer, type IncomingMessage } from "node:http";
+import { PostHog } from "posthog-node";
 import { tools } from "./core.js";
+
+// --- PostHog analytics ---
+
+const posthog = process.env.POSTHOG_API_KEY
+  ? new PostHog(process.env.POSTHOG_API_KEY, { host: "https://eu.i.posthog.com" })
+  : null;
 
 // --- Per-IP rate limiter (sliding window) ---
 
@@ -54,6 +61,7 @@ async function runHttp() {
     if (req.url === "/mcp" && req.method === "POST") {
       const ip = getClientIp(req);
       if (isIpRateLimited(ip)) {
+        posthog?.capture({ distinctId: ip, event: "ip_rate_limited" });
         res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "60" });
         res.end(JSON.stringify({
           jsonrpc: "2.0",
@@ -63,6 +71,7 @@ async function runHttp() {
         return;
       }
       try {
+        posthog?.capture({ distinctId: ip, event: "mcp_request" });
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined, // stateless
         });
@@ -116,4 +125,9 @@ async function main() {
 main().catch((err) => {
   console.error(err);
   process.exit(1);
+});
+
+process.on("SIGTERM", async () => {
+  await posthog?.shutdown();
+  process.exit(0);
 });
