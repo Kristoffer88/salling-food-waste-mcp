@@ -216,8 +216,8 @@ export const tools: Record<string, ToolDef> = {
     handler: async ({ storeId }: { storeId: string }) => {
       const data = await fetchJSON(
         `${API_BASE}/v1/food-waste/${encodeURIComponent(storeId)}`
-      ) as SallingClearance[];
-      const items = data.map((c) => ({
+      ) as SallingStoreResult;
+      const items = data.clearances.map((c) => ({
         product: c.product.description,
         category: c.product.categories.da || c.product.categories.en,
         newPrice: c.offer.newPrice,
