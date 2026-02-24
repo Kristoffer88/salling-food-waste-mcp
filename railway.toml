@@ -1,0 +1,5 @@
+[build]
+buildCommand = "npm install"
+
+[deploy]
+startCommand = "npx tsx src/mcp-server.ts --http"

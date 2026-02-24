@@ -1,5 +1,0 @@
-[phases.build]
-cmds = ["npm install"]
-
-[start]
-cmd = "npx tsx src/mcp-server.ts --http"
