@@ -76,7 +76,7 @@ export const tools: Record<string, ToolDef> = {
         radius: z
           .number()
           .optional()
-          .describe("Search radius in km (default: 5). Only used for coordinate/address lookups."),
+          .describe("Search radius in km (default: 1). Only used for coordinate/address lookups."),
       }),
     },
     handler: async ({ location, radius }: { location: string; radius?: number }) => {
@@ -85,8 +85,7 @@ export const tools: Record<string, ToolDef> = {
       if (resolved.type === "zip") {
         url = `${API_BASE}/v1/food-waste/?zip=${encodeURIComponent(resolved.zip)}`;
       } else {
-        url = `${API_BASE}/v1/food-waste/?geo=${resolved.lat},${resolved.lon}`;
-        if (radius !== undefined) url += `&radius=${radius}`;
+        url = `${API_BASE}/v1/food-waste/?geo=${resolved.lat},${resolved.lon}&radius=${radius ?? 1}`;
       }
       const data = await fetchJSON(url);
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
