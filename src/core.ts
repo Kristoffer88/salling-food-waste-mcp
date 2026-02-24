@@ -12,8 +12,74 @@ if (!API_KEY) {
 
 export const headers = { Authorization: `Bearer ${API_KEY}` };
 
+// --- Salling API rate-limit state ---
+
+let nextAllowedAt = 0;   // epoch ms — set from Retry-After
+let dailyCount = 0;
+let dailyResetDate = "";  // "YYYY-MM-DD" UTC
+
+const DAILY_QUOTA_LIMIT = 9_500; // soft cap (hard limit is 10,000)
+
+function todayUTC(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function parseRetryAfter(header: string | null): number | null {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs > 0) return secs * 1000;
+  const date = Date.parse(header);
+  if (!isNaN(date)) return Math.max(0, date - Date.now());
+  return null;
+}
+
+export class RateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RateLimitError";
+  }
+}
+
 export async function fetchJSON(url: string) {
+  // Reset daily counter on new UTC day
+  const today = todayUTC();
+  if (dailyResetDate !== today) {
+    dailyCount = 0;
+    dailyResetDate = today;
+  }
+
+  // Pre-request check: respect Retry-After from a previous response
+  if (Date.now() < nextAllowedAt) {
+    const waitSec = Math.ceil((nextAllowedAt - Date.now()) / 1000);
+    throw new RateLimitError(
+      `Salling API rate-limited. Try again in ${waitSec}s.`
+    );
+  }
+
+  // Pre-request check: daily quota soft cap
+  if (dailyCount >= DAILY_QUOTA_LIMIT) {
+    throw new RateLimitError(
+      `Daily API quota nearly exhausted (${dailyCount}/${DAILY_QUOTA_LIMIT}). Requests paused until midnight UTC.`
+    );
+  }
+
+  dailyCount++;
+
   const res = await fetch(url, { headers });
+
+  // Always check Retry-After (some APIs send it on 200 as a warning)
+  const retryMs = parseRetryAfter(res.headers.get("retry-after"));
+  if (retryMs) {
+    nextAllowedAt = Date.now() + retryMs;
+  }
+
+  if (res.status === 429) {
+    const waitSec = retryMs ? Math.ceil(retryMs / 1000) : 60;
+    throw new RateLimitError(
+      `Salling API rate limit hit (429). Retry after ${waitSec}s.`
+    );
+  }
+
   if (!res.ok) {
     throw new Error(`Salling API error: ${res.status} ${res.statusText}`);
   }

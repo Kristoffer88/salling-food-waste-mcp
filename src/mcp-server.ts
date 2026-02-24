@@ -1,8 +1,38 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import { tools } from "./core.js";
+
+// --- Per-IP rate limiter (sliding window) ---
+
+const IP_WINDOW_MS = 60_000; // 1 minute
+const IP_MAX_REQUESTS = parseInt(process.env.IP_RATE_LIMIT ?? "10", 10);
+const ipRequests = new Map<string, number[]>();
+
+function getClientIp(req: IncomingMessage): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") return forwarded.split(",")[0].trim();
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+/** Returns true if the request should be rejected (rate limited). */
+function isIpRateLimited(ip: string): boolean {
+  const now = Date.now();
+  let timestamps = ipRequests.get(ip);
+  if (!timestamps) {
+    timestamps = [];
+    ipRequests.set(ip, timestamps);
+  }
+  // Prune entries outside the window
+  const cutoff = now - IP_WINDOW_MS;
+  while (timestamps.length > 0 && timestamps[0] <= cutoff) {
+    timestamps.shift();
+  }
+  if (timestamps.length >= IP_MAX_REQUESTS) return true;
+  timestamps.push(now);
+  return false;
+}
 
 function createMcpServer(): McpServer {
   const server = new McpServer({
@@ -22,6 +52,16 @@ async function runHttp() {
 
   const httpServer = createServer(async (req, res) => {
     if (req.url === "/mcp" && req.method === "POST") {
+      const ip = getClientIp(req);
+      if (isIpRateLimited(ip)) {
+        res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "60" });
+        res.end(JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32005, message: "Rate limit exceeded. Max 10 requests per minute." },
+          id: null,
+        }));
+        return;
+      }
       try {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined, // stateless
