@@ -118,6 +118,46 @@ export async function resolveLocation(location: string): Promise<
   return { type: "geo", lat, lon };
 }
 
+// --- Salling API response types ---
+
+interface SallingAddress {
+  city: string;
+  country: string;
+  extra: string | null;
+  street: string;
+  zip: string;
+}
+
+interface SallingStore {
+  id: string;
+  name: string;
+  brand: string;
+  address: SallingAddress;
+}
+
+interface SallingOffer {
+  newPrice: number;
+  originalPrice: number;
+  percentDiscount: number;
+  stock: number;
+  endTime: string;
+}
+
+interface SallingProduct {
+  description: string;
+  categories: { da?: string; en?: string };
+}
+
+interface SallingClearance {
+  offer: SallingOffer;
+  product: SallingProduct;
+}
+
+interface SallingStoreResult {
+  store: SallingStore;
+  clearances: SallingClearance[];
+}
+
 // --- Tool definitions (shared across all modes) ---
 
 export type ToolDef = {
@@ -153,8 +193,15 @@ export const tools: Record<string, ToolDef> = {
       } else {
         url = `${API_BASE}/v1/food-waste/?geo=${resolved.lat},${resolved.lon}&radius=${radius ?? 1}`;
       }
-      const data = await fetchJSON(url);
-      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+      const data = await fetchJSON(url) as SallingStoreResult[];
+      const summary = data.map((s) => ({
+        storeId: s.store.id,
+        name: s.store.name,
+        brand: s.store.brand,
+        address: s.store.address,
+        itemCount: s.clearances.length,
+      }));
+      return { content: [{ type: "text" as const, text: JSON.stringify(summary, null, 2) }] };
     },
   },
   get_store_food_waste: {
@@ -169,8 +216,17 @@ export const tools: Record<string, ToolDef> = {
     handler: async ({ storeId }: { storeId: string }) => {
       const data = await fetchJSON(
         `${API_BASE}/v1/food-waste/${encodeURIComponent(storeId)}`
-      );
-      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+      ) as SallingClearance[];
+      const items = data.map((c) => ({
+        product: c.product.description,
+        category: c.product.categories.da || c.product.categories.en,
+        newPrice: c.offer.newPrice,
+        originalPrice: c.offer.originalPrice,
+        discount: `${c.offer.percentDiscount}%`,
+        stock: c.offer.stock,
+        expires: c.offer.endTime,
+      }));
+      return { content: [{ type: "text" as const, text: JSON.stringify(items, null, 2) }] };
     },
   },
 };
