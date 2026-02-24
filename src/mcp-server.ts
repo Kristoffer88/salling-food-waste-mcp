@@ -19,15 +19,23 @@ function createMcpServer(): McpServer {
 
 async function runHttp() {
   const port = parseInt(process.env.PORT ?? "3001", 10);
-  const server = createMcpServer();
 
   const httpServer = createServer(async (req, res) => {
     if (req.url === "/mcp" && req.method === "POST") {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined, // stateless
-      });
-      await server.connect(transport);
-      await transport.handleRequest(req, res);
+      try {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined, // stateless
+        });
+        const server = createMcpServer();
+        await server.connect(transport);
+        await transport.handleRequest(req, res);
+      } catch (err) {
+        console.error("MCP request error:", err);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null }));
+        }
+      }
       return;
     }
     // Health check
