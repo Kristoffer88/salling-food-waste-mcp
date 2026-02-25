@@ -2,7 +2,7 @@
 
 Find discounted food waste from Danish supermarkets (Salling Group) via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
-**Live endpoint:** `https://mad-production-8e4b.up.railway.app/mcp`
+**Live endpoint:** `https://salling-food-waste-mcp-production.up.railway.app/mcp`
 
 ## Tools
 
@@ -22,7 +22,7 @@ Requires Plus, Team, Business, Enterprise, or Education plan with Developer Mode
 3. Click **"Add sources"**
 4. Enter the server URL:
    ```
-   https://mad-production-8e4b.up.railway.app/mcp
+   https://salling-food-waste-mcp-production.up.railway.app/mcp
    ```
 5. Check **"I trust this application"** and click **Create**
 
@@ -34,7 +34,7 @@ Requires Pro, Max, Team, or Enterprise plan.
 2. Click **"Add custom connector"**
 3. Enter the server URL:
    ```
-   https://mad-production-8e4b.up.railway.app/mcp
+   https://salling-food-waste-mcp-production.up.railway.app/mcp
    ```
 4. Click **Add**
 5. In chat, click the **Search and Tools** icon to enable the connector
@@ -58,7 +58,7 @@ Edit your config file:
       "command": "npx",
       "args": [
         "mcp-remote@latest",
-        "https://mad-production-8e4b.up.railway.app/mcp"
+        "https://salling-food-waste-mcp-production.up.railway.app/mcp"
       ]
     }
   }
@@ -70,7 +70,7 @@ Restart Claude Desktop after saving.
 ### Claude Code
 
 ```bash
-claude mcp add --transport http --scope user madspild https://mad-production-8e4b.up.railway.app/mcp
+claude mcp add --transport http --scope user madspild https://salling-food-waste-mcp-production.up.railway.app/mcp
 ```
 
 Or add to `.mcp.json` in your project:
@@ -80,7 +80,7 @@ Or add to `.mcp.json` in your project:
   "mcpServers": {
     "madspild": {
       "type": "http",
-      "url": "https://mad-production-8e4b.up.railway.app/mcp"
+      "url": "https://salling-food-waste-mcp-production.up.railway.app/mcp"
     }
   }
 }
