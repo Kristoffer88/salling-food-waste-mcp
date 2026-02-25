@@ -1,4 +1,4 @@
-# Madspild MCP Server
+# Salling Food Waste MCP Server
 
 Find discounted food waste from Danish supermarkets (Salling Group) via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
@@ -94,12 +94,6 @@ Or add to `.mcp.json` in your project:
 
 ## Self-hosting
 
-```bash
-git clone https://github.com/Kristoffer88/mad.git
-cd mad
-npm install
-```
-
 Create `.env`:
 
 ```
@@ -110,6 +104,8 @@ POSTHOG_API_KEY=your_posthog_key_here  # optional
 Get a Salling API key at [developer.sallinggroup.com](https://developer.sallinggroup.com/).
 
 ```bash
+npm install
+
 # HTTP mode (for deployment)
 npx tsx src/mcp-server.ts --http
 

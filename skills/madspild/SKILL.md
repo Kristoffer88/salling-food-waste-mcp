@@ -2,52 +2,37 @@
 name: madspild
 description: Find discounted food waste (madspild) from Danish supermarkets (Netto, Føtex, Bilka). Triggers on food waste, cheap groceries, meal planning, "madspild", "tilbud", nearby deals.
 allowed-tools:
-  - Bash(npx tsx src/cli.ts:*)
+  - mcp__claude_ai_Madspild__search_food_waste
+  - mcp__claude_ai_Madspild__get_store_food_waste
 ---
 
 # Madspild — Salling Food Waste
 
-Query the Salling Group API for discounted food-waste items at nearby stores.
+Query the Salling Group API for discounted food-waste items at nearby stores via MCP tools.
 
-## CLI Usage
+## MCP Tools
 
-### Search by location (ZIP, address, or coordinates)
+### search_food_waste
 
-```bash
-# By ZIP code
-npx tsx src/cli.ts search 8000
+Find nearby stores with clearance items. Accepts:
+- Danish ZIP code (e.g. `8000`)
+- GPS coordinates (e.g. `56.15,10.21`)
+- Danish address (e.g. `Vestergade 1, Aarhus`)
+- Optional `radius` in km (default: 1)
 
-# By Danish address (geocoded via Nominatim)
-npx tsx src/cli.ts search "Vestergade 1, Aarhus"
+### get_store_food_waste
 
-# By GPS coordinates
-npx tsx src/cli.ts search "56.15,10.21"
-
-# With custom radius (km)
-npx tsx src/cli.ts search "Nørrebrogade 1, København" --radius 10
-
-# Raw JSON output
-npx tsx src/cli.ts search 8000 --json
-```
-
-### Get products for a specific store
-
-```bash
-npx tsx src/cli.ts store <store-id>
-npx tsx src/cli.ts store <store-id> --json
-```
+Get all discounted products for a specific store by Salling store ID.
 
 ## Output Format
 
-Human-readable by default. Each product line shows:
+Each product includes:
 - Product name, original price, offer price, discount percentage
 - Use-by date (offer.endTime) and remaining stock (offer.stock)
-
-Use `--json` for raw API JSON.
 
 ## Suggested Workflow
 
 1. Search by location to find nearby stores with deals
 2. Pick interesting stores from the results
-3. Use `store <id>` for full product lists on specific stores
+3. Use `get_store_food_waste` for full product lists on specific stores
 4. Summarize the best deals, group by category, or suggest meals from available items
