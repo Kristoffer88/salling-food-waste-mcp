@@ -34,6 +34,11 @@ let dailyCount = 0;
 let dailyResetDate = "";
 
 const DAILY_QUOTA_LIMIT = 9_500;
+const MAX_WAIT_MS = parseInt(process.env.MAX_RETRY_WAIT_MS ?? "5000", 10);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function todayUTC(): string {
   return new Date().toISOString().slice(0, 10);
@@ -62,8 +67,11 @@ async function fetchJSON(url: string) {
     dailyResetDate = today;
   }
 
-  if (Date.now() < nextAllowedAt) {
-    const waitSec = Math.ceil((nextAllowedAt - Date.now()) / 1000);
+  const waitMs = nextAllowedAt - Date.now();
+  if (waitMs > 0 && waitMs <= MAX_WAIT_MS) {
+    await sleep(waitMs);
+  } else if (waitMs > 0) {
+    const waitSec = Math.ceil(waitMs / 1000);
     throw new RateLimitError(`Salling API rate-limited. Try again in ${waitSec}s.`);
   }
 
@@ -80,7 +88,19 @@ async function fetchJSON(url: string) {
   if (retryMs) nextAllowedAt = Date.now() + retryMs;
 
   if (res.status === 429) {
-    const waitSec = retryMs ? Math.ceil(retryMs / 1000) : 60;
+    const retryWait = retryMs ?? 60_000;
+    if (retryWait <= MAX_WAIT_MS) {
+      await sleep(retryWait);
+      dailyCount++;
+      const retryRes = await fetch(url, { headers });
+      const retryRetryMs = parseRetryAfter(retryRes.headers.get("retry-after"));
+      if (retryRetryMs) nextAllowedAt = Date.now() + retryRetryMs;
+      if (!retryRes.ok) {
+        throw new RateLimitError(`Salling API rate limit hit (${retryRes.status}) after retry.`);
+      }
+      return retryRes.json();
+    }
+    const waitSec = Math.ceil(retryWait / 1000);
     throw new RateLimitError(`Salling API rate limit hit (429). Retry after ${waitSec}s.`);
   }
 
@@ -192,7 +212,7 @@ function createMcpServer(): McpServer {
 
 // --- Per-IP rate limiting ---
 
-const IP_WINDOW_MS = 60_000;
+const IP_WINDOW_MS = parseInt(process.env.IP_RATE_WINDOW_MS ?? "60000", 10);
 const IP_MAX_REQUESTS = parseInt(process.env.IP_RATE_LIMIT ?? "10", 10);
 const ipRequests = new Map<string, number[]>();
 
