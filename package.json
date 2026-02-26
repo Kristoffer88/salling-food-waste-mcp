@@ -1,9 +1,16 @@
 {
   "name": "salling-food-waste-mcp",
   "version": "1.0.0",
+  "description": "MCP server for finding discounted food waste at Salling Group stores in Denmark",
+  "license": "MIT",
+  "author": "Kristoffer88",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kristoffer88/salling-food-waste-mcp.git"
+  },
   "scripts": {
-    "mcp": "tsx src/mcp-server.ts",
-    "mcp:http": "tsx src/mcp-server.ts --http",
+    "mcp": "tsx mcp-server.ts",
+    "mcp:http": "tsx mcp-server.ts --http",
     "knip": "knip"
   },
   "dependencies": {

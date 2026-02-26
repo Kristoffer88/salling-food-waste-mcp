@@ -2,6 +2,7 @@ import "dotenv/config";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import { PostHog } from "posthog-node";
 import { z } from "zod";
@@ -163,8 +164,8 @@ function createMcpServer(): McpServer {
       description:
         "Find nearby stores with discounted food waste items. Accepts a Danish ZIP code (e.g. '8000'), GPS coordinates (e.g. '56.15,10.21'), or a Danish address (e.g. 'Vestergade 1, Aarhus'). Returns stores with their clearance products, prices, discounts, use-by date (offer.endTime), and remaining stock (offer.stock).",
       inputSchema: z.object({
-        location: z.string().describe("Danish ZIP code, GPS coordinates (lat,lon), or a Danish street address"),
-        radius: z.number().optional().describe("Search radius in km (default: 1). Only used for coordinate/address lookups."),
+        location: z.string().min(1).max(500).describe("Danish ZIP code, GPS coordinates (lat,lon), or a Danish street address"),
+        radius: z.number().min(0.1).max(200).optional().describe("Search radius in km (default: 1). Only used for coordinate/address lookups."),
       }),
     },
     async ({ location, radius }: { location: string; radius?: number }) => {
@@ -190,7 +191,7 @@ function createMcpServer(): McpServer {
       description:
         "Get the full list of discounted food waste products for a specific store by its Salling store ID. Includes use-by date (offer.endTime) and remaining stock (offer.stock) per item.",
       inputSchema: z.object({
-        storeId: z.string().describe("Salling store ID"),
+        storeId: z.string().min(1).max(100).describe("Salling store ID"),
       }),
     },
     async ({ storeId }: { storeId: string }) => {
@@ -233,6 +234,7 @@ function isIpRateLimited(ip: string): boolean {
   const firstValid = timestamps.findIndex((t) => t > cutoff);
   if (firstValid > 0) timestamps.splice(0, firstValid);
   else if (firstValid === -1) timestamps.length = 0;
+  if (timestamps.length === 0) { ipRequests.delete(ip); return false; }
   if (timestamps.length >= IP_MAX_REQUESTS) return true;
   timestamps.push(now);
   return false;
@@ -262,14 +264,16 @@ async function runHttp(): Promise<void> {
 
     const ip = getClientIp(req);
 
+    const anonId = createHash("sha256").update(ip).digest("hex").slice(0, 16);
+
     if (isIpRateLimited(ip)) {
-      posthog?.capture({ distinctId: ip, event: "ip_rate_limited" });
+      posthog?.capture({ distinctId: anonId, event: "ip_rate_limited" });
       res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "60" });
       res.end(jsonRpcError(-32005, `Rate limit exceeded. Max ${IP_MAX_REQUESTS} requests per minute.`));
       return;
     }
 
-    posthog?.capture({ distinctId: ip, event: "mcp_request" });
+    posthog?.capture({ distinctId: anonId, event: "mcp_request" });
 
     try {
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
