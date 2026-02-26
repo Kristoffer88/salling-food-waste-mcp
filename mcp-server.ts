@@ -144,7 +144,7 @@ interface SallingStoreResult {
   };
   clearances: {
     offer: { newPrice: number; originalPrice: number; percentDiscount: number; stock: number; endTime: string };
-    product: { description: string; categories: { da?: string; en?: string } };
+    product: { description: string; categories?: { da?: string; en?: string } };
   }[];
 }
 
@@ -198,7 +198,7 @@ function createMcpServer(): McpServer {
       const data = (await fetchJSON(`${API_BASE}/v1/food-waste/${encodeURIComponent(storeId)}`)) as SallingStoreResult;
       return textResult(data.clearances.map((c) => ({
         product: c.product.description,
-        category: c.product.categories.da || c.product.categories.en,
+        category: c.product.categories?.da || c.product.categories?.en || null,
         newPrice: c.offer.newPrice,
         originalPrice: c.offer.originalPrice,
         discount: `${c.offer.percentDiscount}%`,
