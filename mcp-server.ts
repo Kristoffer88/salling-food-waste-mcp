@@ -109,6 +109,31 @@ async function fetchJSON(url: string) {
   return res.json();
 }
 
+// --- Response cache ---
+
+const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS ?? "300000", 10); // 5 min default
+const GEOCODE_CACHE_TTL_MS = 3_600_000; // 1 hour
+
+const cache = new Map<string, { data: unknown; expiry: number }>();
+
+function cacheGet(key: string): unknown | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiry) { cache.delete(key); return undefined; }
+  return entry.data;
+}
+
+function cacheSet(key: string, data: unknown, ttl = CACHE_TTL_MS): void {
+  cache.set(key, { data, expiry: Date.now() + ttl });
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of cache) {
+    if (now > entry.expiry) cache.delete(key);
+  }
+}, 60_000).unref();
+
 // --- Geocoding ---
 
 const ZIP_RE = /^\d{4}$/;
@@ -116,12 +141,18 @@ const COORD_RE = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/;
 
 async function geocode(address: string): Promise<{ lat: number; lon: number }> {
   const cleaned = address.replace(/\b\d{4}\s+/g, "").replace(/\s+[A-Z](?:\s*,|$)/g, ",").replace(/,\s*$/, "").trim();
+  const cacheKey = `geocode:${cleaned.toLowerCase()}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached as { lat: number; lon: number };
+
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cleaned + ", Denmark")}&format=json&limit=1&countrycodes=dk`;
   const res = await fetch(url, { headers: { "User-Agent": "salling-food-waste-mcp/1.0" } });
   if (!res.ok) throw new Error(`Nominatim geocoding error: ${res.status}`);
   const results = await res.json() as { lat: string; lon: string }[];
   if (!results.length) throw new Error(`Could not geocode address: "${address}"`);
-  return { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
+  const result = { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
+  cacheSet(cacheKey, result, GEOCODE_CACHE_TTL_MS);
+  return result;
 }
 
 async function resolveLocation(location: string) {
@@ -170,17 +201,25 @@ function createMcpServer(): McpServer {
     },
     async ({ location, radius }: { location: string; radius?: number }) => {
       const resolved = await resolveLocation(location);
+      const cacheKey = resolved.type === "zip"
+        ? `zip:${resolved.zip}`
+        : `geo:${resolved.lat.toFixed(2)},${resolved.lon.toFixed(2)}:${Math.round(radius ?? 1)}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return textResult(cached);
+
       const url = resolved.type === "zip"
         ? `${API_BASE}/v1/food-waste/?zip=${encodeURIComponent(resolved.zip)}`
         : `${API_BASE}/v1/food-waste/?geo=${resolved.lat},${resolved.lon}&radius=${radius ?? 1}`;
       const data = (await fetchJSON(url)) as SallingStoreResult[];
-      return textResult(data.map((s) => ({
+      const result = data.map((s) => ({
         storeId: s.store.id,
         name: s.store.name,
         brand: s.store.brand,
         address: s.store.address,
         itemCount: s.clearances.length,
-      })));
+      }));
+      cacheSet(cacheKey, result);
+      return textResult(result);
     },
   );
 
@@ -195,8 +234,12 @@ function createMcpServer(): McpServer {
       }),
     },
     async ({ storeId }: { storeId: string }) => {
+      const cacheKey = `store:${storeId}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return textResult(cached);
+
       const data = (await fetchJSON(`${API_BASE}/v1/food-waste/${encodeURIComponent(storeId)}`)) as SallingStoreResult;
-      return textResult(data.clearances.map((c) => ({
+      const result = data.clearances.map((c) => ({
         product: c.product.description,
         category: c.product.categories?.da || c.product.categories?.en || null,
         newPrice: c.offer.newPrice,
@@ -204,7 +247,9 @@ function createMcpServer(): McpServer {
         discount: `${c.offer.percentDiscount}%`,
         stock: c.offer.stock,
         expires: c.offer.endTime,
-      })));
+      }));
+      cacheSet(cacheKey, result);
+      return textResult(result);
     },
   );
 
@@ -291,6 +336,9 @@ async function runHttp(): Promise<void> {
 
   httpServer.listen(port, () => {
     console.error(`MCP HTTP server listening on http://localhost:${port}/mcp`);
+    fetch("https://icanhazip.com/").then((r) => r.text()).then((ip) => {
+      console.error(`Egress IP: ${ip.trim()}`);
+    }).catch(() => {});
   });
 }
 
