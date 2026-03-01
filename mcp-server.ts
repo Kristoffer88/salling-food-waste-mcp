@@ -186,14 +186,19 @@ function textResult(data: unknown) {
 }
 
 function createMcpServer(): McpServer {
-  const server = new McpServer({ name: "salling-food-waste", version: "1.0.0" });
+  const server = new McpServer({
+    name: "salling-food-waste",
+    version: "1.0.0",
+    description:
+      "Access discounted food waste products from Salling Group stores (Netto, føtex, Bilka) across Denmark. Helps users find nearby stores with clearance items, see prices, discounts, stock levels, and expiry dates. Useful for saving money on groceries and reducing food waste.\n\nTypical workflow: 1) Search for nearby stores by location → 2) Get product list for a specific store → 3) Present grouped and sorted results to the user.",
+  });
 
   server.registerTool(
     "search_food_waste",
     {
       title: "Search food waste",
       description:
-        "Find nearby stores with discounted food waste items. Accepts a Danish ZIP code (e.g. '8000'), GPS coordinates (e.g. '56.15,10.21'), or a Danish address (e.g. 'Vestergade 1, Aarhus'). Returns stores with their clearance products, prices, discounts, use-by date (offer.endTime), and remaining stock (offer.stock).",
+        "Find nearby Salling Group stores (Netto, føtex, Bilka) with discounted food waste items.\n\nAccepts a Danish ZIP code (e.g. '8000'), GPS coordinates (e.g. '56.15,10.21'), or a Danish street address including city (e.g. 'Vestergade 1, Aarhus'). Addresses must include city name to geocode reliably — if geocoding fails, retry with the ZIP code instead.\n\nReturns a list of stores with store ID, name, brand, address, and number of available items. Use the store ID with get_store_food_waste to fetch the full product list.\n\nOnly covers Salling Group stores — not Rema 1000, Lidl, Aldi, etc.",
       inputSchema: z.object({
         location: z.string().min(1).max(500).describe("Danish ZIP code, GPS coordinates (lat,lon), or a Danish street address"),
         radius: z.number().min(0.1).max(200).optional().describe("Search radius in km (default: 1). Only used for coordinate/address lookups."),
@@ -228,7 +233,7 @@ function createMcpServer(): McpServer {
     {
       title: "Get store food waste",
       description:
-        "Get the full list of discounted food waste products for a specific store by its Salling store ID. Includes use-by date (offer.endTime) and remaining stock (offer.stock) per item.",
+        "Get all discounted food waste products for a specific Salling Group store.\n\nReturns product name, original price, discounted price, discount percentage, remaining stock, and expiry date per item. The category field may be null for some products.\n\nWhen presenting results to the user:\n- Group products by type (dairy, meat, bread, etc.) based on the product name — Danish product names typically contain the product type and brand (e.g. 'DANBO 45+ MAMMEN' = cheese, 'SKAFTEKOTELET PREMIEUR' = pork).\n- Highlight the best deals (40%+ discount) and items expiring today/tomorrow.\n- Include stock count so the user knows availability.\n- Note that prices are in DKK and stock can change quickly — items may be sold out in-store.",
       inputSchema: z.object({
         storeId: z.string().min(1).max(100).describe("Salling store ID"),
       }),
