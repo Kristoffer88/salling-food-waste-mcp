@@ -17,8 +17,6 @@ if (!API_KEY) {
   process.exit(1);
 }
 
-const headers = { Authorization: `Bearer ${API_KEY}` };
-
 const posthog = process.env.POSTHOG_API_KEY
   ? new PostHog(process.env.POSTHOG_API_KEY, { host: "https://eu.i.posthog.com" })
   : null;
@@ -61,39 +59,51 @@ class RateLimitError extends Error {
   }
 }
 
-async function fetchJSON(url: string) {
-  const today = todayUTC();
-  if (dailyResetDate !== today) {
-    dailyCount = 0;
-    dailyResetDate = today;
+async function fetchJSON(url: string, apiKeyOverride?: string) {
+  const useServerQuota = !apiKeyOverride;
+  const authHeaders = { Authorization: `Bearer ${apiKeyOverride ?? API_KEY}` };
+
+  if (useServerQuota) {
+    const today = todayUTC();
+    if (dailyResetDate !== today) {
+      dailyCount = 0;
+      dailyResetDate = today;
+    }
+
+    const waitMs = nextAllowedAt - Date.now();
+    if (waitMs > 0 && waitMs <= MAX_WAIT_MS) {
+      await sleep(waitMs);
+    } else if (waitMs > 0) {
+      const waitSec = Math.ceil(waitMs / 1000);
+      throw new RateLimitError(`Salling API rate-limited. Try again in ${waitSec}s.`);
+    }
+
+    if (dailyCount >= DAILY_QUOTA_LIMIT) {
+      throw new RateLimitError(
+        `Daily API quota nearly exhausted (${dailyCount}/${DAILY_QUOTA_LIMIT}). Requests paused until midnight UTC.`
+      );
+    }
+
+    dailyCount++;
   }
 
-  const waitMs = nextAllowedAt - Date.now();
-  if (waitMs > 0 && waitMs <= MAX_WAIT_MS) {
-    await sleep(waitMs);
-  } else if (waitMs > 0) {
-    const waitSec = Math.ceil(waitMs / 1000);
-    throw new RateLimitError(`Salling API rate-limited. Try again in ${waitSec}s.`);
+  const res = await fetch(url, { headers: authHeaders });
+
+  if (useServerQuota) {
+    const retryMs = parseRetryAfter(res.headers.get("retry-after"));
+    if (retryMs) nextAllowedAt = Date.now() + retryMs;
   }
-
-  if (dailyCount >= DAILY_QUOTA_LIMIT) {
-    throw new RateLimitError(
-      `Daily API quota nearly exhausted (${dailyCount}/${DAILY_QUOTA_LIMIT}). Requests paused until midnight UTC.`
-    );
-  }
-
-  dailyCount++;
-  const res = await fetch(url, { headers });
-
-  const retryMs = parseRetryAfter(res.headers.get("retry-after"));
-  if (retryMs) nextAllowedAt = Date.now() + retryMs;
 
   if (res.status === 429) {
+    if (!useServerQuota) {
+      throw new RateLimitError(`Salling API rate limit hit (429). Your API key is being throttled.`);
+    }
+    const retryMs = parseRetryAfter(res.headers.get("retry-after"));
     const retryWait = retryMs ?? 60_000;
     if (retryWait <= MAX_WAIT_MS) {
       await sleep(retryWait);
       dailyCount++;
-      const retryRes = await fetch(url, { headers });
+      const retryRes = await fetch(url, { headers: authHeaders });
       const retryRetryMs = parseRetryAfter(retryRes.headers.get("retry-after"));
       if (retryRetryMs) nextAllowedAt = Date.now() + retryRetryMs;
       if (!retryRes.ok) {
@@ -185,7 +195,7 @@ function textResult(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
-function createMcpServer(): McpServer {
+function createMcpServer(apiKeyOverride?: string): McpServer {
   const server = new McpServer({
     name: "salling-food-waste",
     version: "1.0.0",
@@ -215,7 +225,7 @@ function createMcpServer(): McpServer {
       const url = resolved.type === "zip"
         ? `${API_BASE}/v1/food-waste/?zip=${encodeURIComponent(resolved.zip)}`
         : `${API_BASE}/v1/food-waste/?geo=${resolved.lat},${resolved.lon}&radius=${radius ?? 1}`;
-      const data = (await fetchJSON(url)) as SallingStoreResult[];
+      const data = (await fetchJSON(url, apiKeyOverride)) as SallingStoreResult[];
       const result = data.map((s) => ({
         storeId: s.store.id,
         name: s.store.name,
@@ -243,7 +253,7 @@ function createMcpServer(): McpServer {
       const cached = cacheGet(cacheKey);
       if (cached) return textResult(cached);
 
-      const data = (await fetchJSON(`${API_BASE}/v1/food-waste/${encodeURIComponent(storeId)}`)) as SallingStoreResult;
+      const data = (await fetchJSON(`${API_BASE}/v1/food-waste/${encodeURIComponent(storeId)}`, apiKeyOverride)) as SallingStoreResult;
       const result = data.clearances.map((c) => ({
         product: c.product.description,
         category: c.product.categories?.da || c.product.categories?.en || null,
@@ -326,8 +336,11 @@ async function runHttp(): Promise<void> {
     posthog?.capture({ distinctId: anonId, event: "mcp_request" });
 
     try {
+      const userApiKey = typeof req.headers["x-salling-api-key"] === "string"
+        ? req.headers["x-salling-api-key"]
+        : undefined;
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-      const server = createMcpServer();
+      const server = createMcpServer(userApiKey);
       await server.connect(transport);
       await transport.handleRequest(req, res);
     } catch (err) {

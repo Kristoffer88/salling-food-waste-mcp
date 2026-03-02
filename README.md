@@ -92,6 +92,19 @@ Or add to `.mcp.json` in your project:
 - **Daily:** Soft cap at 9,500 requests/day (Salling API hard limit is 10,000)
 - The server respects `Retry-After` headers from the Salling API to avoid quarantine
 
+## Bring your own API key (HTTP mode)
+
+When using the public HTTP endpoint, you can supply your own [Salling API key](https://developer.sallinggroup.com/) via the `X-Salling-API-Key` header. This bypasses the server's shared quota so you aren't affected by other users' traffic.
+
+```bash
+curl -X POST https://salling-food-waste-mcp-production.up.railway.app/mcp \
+  -H "Content-Type: application/json" \
+  -H "X-Salling-API-Key: YOUR_KEY_HERE" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+If the header is omitted, the server falls back to its built-in key.
+
 ## Self-hosting
 
 Create `.env`:
