@@ -120,8 +120,8 @@ Get a Salling API key at [developer.sallinggroup.com](https://developer.sallingg
 npm install
 
 # HTTP mode (for deployment)
-npx tsx src/mcp-server.ts --http
+npx tsx mcp-server.ts --http
 
 # Stdio mode (for local Claude Desktop/Code)
-npx tsx src/mcp-server.ts
+npx tsx mcp-server.ts
 ```
