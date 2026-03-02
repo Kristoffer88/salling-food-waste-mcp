@@ -21,10 +21,18 @@ const posthog = process.env.POSTHOG_API_KEY
   ? new PostHog(process.env.POSTHOG_API_KEY, { host: "https://eu.i.posthog.com" })
   : null;
 
-process.on("SIGTERM", async () => {
+let httpServer: ReturnType<typeof createServer> | null = null;
+
+async function shutdown() {
+  if (httpServer) {
+    await new Promise<void>((resolve) => httpServer!.close(() => resolve()));
+  }
   await posthog?.shutdown();
   process.exit(0);
-});
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 // --- Salling API rate limiting ---
 
@@ -123,6 +131,7 @@ async function fetchJSON(url: string, apiKeyOverride?: string) {
 
 const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS ?? "300000", 10); // 5 min default
 const GEOCODE_CACHE_TTL_MS = 3_600_000; // 1 hour
+const MAX_CACHE_SIZE = 10_000;
 
 const cache = new Map<string, { data: unknown; expiry: number }>();
 
@@ -134,6 +143,10 @@ function cacheGet(key: string): unknown | undefined {
 }
 
 function cacheSet(key: string, data: unknown, ttl = CACHE_TTL_MS): void {
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const firstKey = cache.keys().next().value!;
+    cache.delete(firstKey);
+  }
   cache.set(key, { data, expiry: Date.now() + ttl });
 }
 
@@ -169,7 +182,14 @@ async function resolveLocation(location: string) {
   const trimmed = location.trim();
   if (ZIP_RE.test(trimmed)) return { type: "zip" as const, zip: trimmed };
   const coordMatch = trimmed.match(COORD_RE);
-  if (coordMatch) return { type: "geo" as const, lat: parseFloat(coordMatch[1]), lon: parseFloat(coordMatch[2]) };
+  if (coordMatch) {
+    const lat = parseFloat(coordMatch[1]);
+    const lon = parseFloat(coordMatch[2]);
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      throw new Error(`Invalid coordinates: lat must be [-90,90] and lon must be [-180,180], got ${lat},${lon}`);
+    }
+    return { type: "geo" as const, lat, lon };
+  }
   const { lat, lon } = await geocode(trimmed);
   return { type: "geo" as const, lat, lon };
 }
@@ -187,6 +207,26 @@ interface SallingStoreResult {
     offer: { newPrice: number; originalPrice: number; percentDiscount: number; stock: number; endTime: string };
     product: { description: string; categories?: { da?: string; en?: string } };
   }[];
+}
+
+// --- API response validation ---
+
+function validateStoreResult(data: unknown): SallingStoreResult {
+  if (typeof data !== "object" || data === null || !("store" in data) || !("clearances" in data)) {
+    throw new Error("Unexpected API response: missing store or clearances");
+  }
+  const d = data as Record<string, unknown>;
+  if (!Array.isArray(d.clearances)) {
+    throw new Error("Unexpected API response: clearances is not an array");
+  }
+  return data as SallingStoreResult;
+}
+
+function validateStoreResults(data: unknown): SallingStoreResult[] {
+  if (!Array.isArray(data)) {
+    throw new Error("Unexpected API response: expected an array of store results");
+  }
+  return data.map(validateStoreResult);
 }
 
 // --- MCP server ---
@@ -225,7 +265,7 @@ function createMcpServer(apiKeyOverride?: string): McpServer {
       const url = resolved.type === "zip"
         ? `${API_BASE}/v1/food-waste/?zip=${encodeURIComponent(resolved.zip)}`
         : `${API_BASE}/v1/food-waste/?geo=${resolved.lat},${resolved.lon}&radius=${radius ?? 1}`;
-      const data = (await fetchJSON(url, apiKeyOverride)) as SallingStoreResult[];
+      const data = validateStoreResults(await fetchJSON(url, apiKeyOverride));
       const result = data.map((s) => ({
         storeId: s.store.id,
         name: s.store.name,
@@ -253,7 +293,7 @@ function createMcpServer(apiKeyOverride?: string): McpServer {
       const cached = cacheGet(cacheKey);
       if (cached) return textResult(cached);
 
-      const data = (await fetchJSON(`${API_BASE}/v1/food-waste/${encodeURIComponent(storeId)}`, apiKeyOverride)) as SallingStoreResult;
+      const data = validateStoreResult(await fetchJSON(`${API_BASE}/v1/food-waste/${encodeURIComponent(storeId)}`, apiKeyOverride));
       const result = data.clearances.map((c) => ({
         product: c.product.description,
         category: c.product.categories?.da || c.product.categories?.en || null,
@@ -275,6 +315,7 @@ function createMcpServer(apiKeyOverride?: string): McpServer {
 
 const IP_WINDOW_MS = parseInt(process.env.IP_RATE_WINDOW_MS ?? "60000", 10);
 const IP_MAX_REQUESTS = parseInt(process.env.IP_RATE_LIMIT ?? "10", 10);
+const MAX_IP_MAP_SIZE = 10_000;
 const ipRequests = new Map<string, number[]>();
 
 function getClientIp(req: IncomingMessage): string {
@@ -296,6 +337,10 @@ function isIpRateLimited(ip: string): boolean {
   else if (firstValid === -1) timestamps.length = 0;
   if (timestamps.length === 0) { ipRequests.delete(ip); return false; }
   if (timestamps.length >= IP_MAX_REQUESTS) return true;
+  if (ipRequests.size >= MAX_IP_MAP_SIZE) {
+    const firstKey = ipRequests.keys().next().value!;
+    ipRequests.delete(firstKey);
+  }
   timestamps.push(now);
   return false;
 }
@@ -309,7 +354,7 @@ function jsonRpcError(code: number, message: string): string {
 async function runHttp(): Promise<void> {
   const port = parseInt(process.env.PORT ?? "3001", 10);
 
-  const httpServer = createServer(async (req, res) => {
+  httpServer = createServer(async (req, res) => {
     if (req.url === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
