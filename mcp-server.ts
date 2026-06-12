@@ -162,20 +162,40 @@ setInterval(() => {
 const ZIP_RE = /^\d{4}$/;
 const COORD_RE = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/;
 
+async function geocodePhoton(query: string): Promise<{ lat: number; lon: number }> {
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query + ", Denmark")}&limit=1&lang=en`;
+  const res = await fetch(url, { headers: { "User-Agent": "salling-food-waste-mcp/1.0" } });
+  if (!res.ok) throw new Error(`Photon geocoding error: ${res.status}`);
+  const data = await res.json() as { features: { geometry: { coordinates: [number, number] } }[] };
+  if (!data.features?.length) throw new Error("Photon returned no results");
+  const [lon, lat] = data.features[0].geometry.coordinates;
+  return { lat, lon };
+}
+
+async function geocodeNominatim(query: string): Promise<{ lat: number; lon: number }> {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ", Denmark")}&format=json&limit=1&countrycodes=dk`;
+  const res = await fetch(url, { headers: { "User-Agent": "salling-food-waste-mcp/1.0" } });
+  if (!res.ok) throw new Error(`Nominatim geocoding error: ${res.status}`);
+  const results = await res.json() as { lat: string; lon: string }[];
+  if (!results.length) throw new Error("Nominatim returned no results");
+  return { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
+}
+
 async function geocode(address: string): Promise<{ lat: number; lon: number }> {
   const cleaned = address.replace(/\b\d{4}\s+/g, "").replace(/\s+[A-Z](?:\s*,|$)/g, ",").replace(/,\s*$/, "").trim();
   const cacheKey = `geocode:${cleaned.toLowerCase()}`;
   const cached = cacheGet(cacheKey);
   if (cached) return cached as { lat: number; lon: number };
 
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cleaned + ", Denmark")}&format=json&limit=1&countrycodes=dk`;
-  const res = await fetch(url, { headers: { "User-Agent": "salling-food-waste-mcp/1.0" } });
-  if (!res.ok) throw new Error(`Nominatim geocoding error: ${res.status}`);
-  const results = await res.json() as { lat: string; lon: string }[];
-  if (!results.length) throw new Error(`Could not geocode address: "${address}"`);
-  const result = { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
-  cacheSet(cacheKey, result, GEOCODE_CACHE_TTL_MS);
-  return result;
+  try {
+    const result = await geocodePhoton(cleaned);
+    cacheSet(cacheKey, result, GEOCODE_CACHE_TTL_MS);
+    return result;
+  } catch {
+    const result = await geocodeNominatim(cleaned);
+    cacheSet(cacheKey, result, GEOCODE_CACHE_TTL_MS);
+    return result;
+  }
 }
 
 async function resolveLocation(location: string) {
